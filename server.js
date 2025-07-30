@@ -10,7 +10,7 @@ const salt = 10;
 const app = express();
 app.use(express.json());
 app.use(cors({
-    origin: ["]http://localhost:3000/login"],
+    origin: ["http://88.200.63.148:6869"],
     methods: ["POST", "GET"],
     credentials: true
 
@@ -18,29 +18,33 @@ app.use(cors({
 app.use(cookieParser())
 
 const db =mysql.createConnection({
-    host: "88.200.63.148",
-    port: 3306,
-    user: "students",
-    password: "******",
+    host: "localhost",
+   // port: 6869,
+    user: "studenti",
+    password: "password",
     database: 'SISIII2025_89231012p',
     
 })
 
-const verifyUser = (req, res , next)=> {
+const verifyUser = (req, res , next) => {
     const token = req.cookies.token;
-    if (!token){
-        return res.json({Error: "You are not authenticated"});
-    }else{
-        jwt.verify(token, "jwt-secret-key", (err, decoded)=> {
-            if(err){
-                return res.json({Error: "token not correct"});
-            }else{
-                req.name = decoded.name;
-                next(); //come back to home page
-            }
-        })
+    console.log("Token received:", token);
+
+    if (!token) {
+        return res.json({ Error: "You are not authenticated" });
     }
-}
+
+    jwt.verify(token, "jwt-secret-key", (err, decoded) => {
+        if (err) {
+            console.error("JWT verify error:", err);
+            return res.json({ Error: "token not correct" });
+        }
+
+        req.name = decoded.name;
+        next();
+    });
+};
+
 app.get('/', verifyUser, (req,res)=> {
     return res.json({Status: "Success", name: req.name});
 })
@@ -78,7 +82,7 @@ app.post('/login', (req, res) => {
                 if(response) {
                     //generate a token
                     const name = data[0].name;//keep this key in .env file dont push to gihub reminder
-                    const token =jwt.sign({name}, "******", {expiresIn: '1d'});
+                    const token =jwt.sign({name}, "jwt-secret-key", {expiresIn: '1d'});
                     res.cookie('token', token);
                     return res.json({Status: "Success"});
                 }else{
@@ -93,11 +97,17 @@ app.post('/login', (req, res) => {
 
 })
 
-app.get('logout', (req, res) => {
-    res.clearCookie('token');
-    return res.json({Status : "Success"})
-})
+app.get('/logout', (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'None'    
+  });
+  return res.json({ Status: "Success", Message: "Logged out" });
+});
 
-app.listen(6868, ()=> {
-    console.log("Running...") 
-})
+
+
+app.listen(6868, '0.0.0.0', () => {
+    console.log("Backend running on port 6868");
+});
