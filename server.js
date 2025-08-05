@@ -4,6 +4,7 @@ import cors from 'cors';
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
 import cookieParser from 'cookie-parser';
+import dotenv from 'dotenv';
 
 const salt = 10;
 
@@ -17,14 +18,13 @@ app.use(cors({
 }));
 app.use(cookieParser())
 
-const db =mysql.createConnection({
-    host: "localhost",
-   // port: 6869,
-    user: "studenti",
-    password: "****",
-    database: 'SISIII2025_89231012p',
-    
-})
+dotenv.config();
+const db = mysql.createConnection({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME
+});
 
 const verifyUser = (req, res , next) => {
     const token = req.cookies.token;
