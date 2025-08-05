@@ -26,6 +26,15 @@ const db = mysql.createConnection({
   database: process.env.DB_NAME
 });
 
+db.connect((err) => {
+  if (err) {
+    console.error('DB connection failed:', err);
+  } else {
+    console.log('Connected to MySQL database');
+  }
+});
+
+
 const verifyUser = (req, res , next) => {
     const token = req.cookies.token;
     console.log("Token received:", token);
@@ -76,7 +85,10 @@ app.post('/register', (req, res)=> {
 app.post('/login', (req, res) => {
     const sql = 'SELECT * from login WHERE email= ?';
     db.query(sql, [req.body.email], (err, data)=> {
-        if (err) return res.json({Error: "Error for finding login in servo"});
+        if (err) {
+            console.error("Login DB query error:", err);
+            return res.json({Error: "Error for finding login in server"});
+        }
         if(data.length > 0){
             bcrypt.compare(req.body.password.toString(), data[0].password, (err,response)=>{
                 if(err) return res.json({Error: "Password compare error"});
@@ -242,6 +254,29 @@ app.post('/delete-card', verifyUser, (req, res) => {
         return res.json({ Status: 'Success', Message: 'Card deleted' });
       });
     });
+  });
+});
+
+
+//getting stats for specific plants 
+app.get('/get-card-stats/:cardId', verifyUser, (req, res) => {
+  const cardId = req.params.cardId;
+
+  const sql = `
+    SELECT temperature, humidity, moisture 
+    FROM card_stats 
+    WHERE card_id = ? 
+    ORDER BY recorded_at DESC 
+    LIMIT 1
+  `;
+  db.query(sql, [cardId], (err, results) => {
+    if (err) return res.json({ Error: 'Failed to fetch stats' });
+
+    if (results.length === 0) {
+      return res.json({ temperature: null, humidity: null, moisture: null });
+    }
+
+    return res.json(results[0]);
   });
 });
 
