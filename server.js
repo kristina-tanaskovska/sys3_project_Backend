@@ -280,6 +280,34 @@ app.get('/get-card-stats/:cardId', verifyUser, (req, res) => {
   });
 });
 
+//history page graphs / data
+app.get('/history/:cardId', async (req, res) => {
+  const { cardId } = req.params;
+  const { range } = req.query;
+
+  let dateFilter = '';
+  if (range === 'today') {
+    dateFilter = 'AND DATE(recorded_at) = CURDATE()';
+  } else if (range === 'week') {
+    dateFilter = 'AND recorded_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+  } else if (range === 'month') {
+    dateFilter = 'AND recorded_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)';
+  }
+
+  const sql = `
+    SELECT temperature, humidity, moisture, recorded_at 
+    FROM card_stats 
+    WHERE card_id = ? ${dateFilter}
+    ORDER BY recorded_at ASC
+  `;
+
+  db.query(sql, [cardId], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(result);
+  });
+});
+
+
 
 app.get('/logout', (req, res) => {
   res.clearCookie('token', {
