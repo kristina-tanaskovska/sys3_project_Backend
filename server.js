@@ -6,6 +6,7 @@ import bcrypt from 'bcrypt'
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
+
 const salt = 10;
 
 const app = express();
@@ -304,6 +305,138 @@ app.get('/history/:cardId', async (req, res) => {
   db.query(sql, [cardId], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(result);
+  });
+});
+
+
+
+// get settings info
+app.get('/garden-settings/:cardId', verifyUser, (req, res) => {
+  const { cardId } = req.params;
+  const userName = req.name;
+
+
+  db.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
+    if (err || userRows.length === 0) return res.status(401).json({ Error: 'User not found' });
+    const userId = userRows[0].id;
+
+
+    const ownsCardSql = `
+      SELECT 1 FROM cards
+      WHERE user_id = ?
+        AND (card1_id = ? OR card2_id = ? OR card3_id = ? OR card4_id = ? OR card5_id = ?)
+      LIMIT 1
+    `;
+    db.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
+      if (err2) return res.status(500).json({ Error: 'Failed to check card ownership' });
+      if (ownRows.length === 0) return res.status(403).json({ Error: 'Card does not belong to user' });
+
+      // fetch parms
+      const sel = 'SELECT * FROM garden_settings WHERE user_id = ? AND card_id = ? LIMIT 1';
+      db.query(sel, [userId, cardId], (err3, rows) => {
+        if (err3) return res.status(500).json({ Error: 'Failed to fetch settings' });
+
+        if (!rows || rows.length === 0) {
+          // empty start card
+          return res.json({
+            isFirstTime: true,
+            minTemp: '',
+            maxTemp: '',
+            minHumidity: '',
+            maxHumidity: '',
+            minMoisture: '',
+            maxMoisture: '',
+            acOn: false,
+            humidifierOn: false,
+            wateringOn: false
+          });
+        }
+
+        const r = rows[0];
+        return res.json({
+          isFirstTime: false,
+          minTemp: r.min_temp,
+          maxTemp: r.max_temp,
+          minHumidity: r.min_humidity,
+          maxHumidity: r.max_humidity,
+          minMoisture: r.min_moisture,
+          maxMoisture: r.max_moisture,
+          acOn: !!r.ac_on,
+          humidifierOn: !!r.humidifier_on,
+          wateringOn: !!r.watering_on,
+          updatedAt: r.updated_at
+        });
+      });
+    });
+  });
+});
+
+//sav or insert parms
+app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
+  const { cardId } = req.params;
+  const {
+    minTemp, maxTemp,
+    minHumidity, maxHumidity,
+    minMoisture, maxMoisture,
+    acOn, humidifierOn, wateringOn
+  } = req.body;
+  const userName = req.name;
+
+  db.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
+    if (err || userRows.length === 0) return res.status(401).json({ Error: 'User not found' });
+    const userId = userRows[0].id;
+
+    // verification
+    const ownsCardSql = `
+      SELECT 1 FROM cards
+      WHERE user_id = ?
+        AND (card1_id = ? OR card2_id = ? OR card3_id = ? OR card4_id = ? OR card5_id = ?)
+      LIMIT 1
+    `;
+    db.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
+      if (err2) return res.status(500).json({ Error: 'Failed to check card ownership' });
+      if (ownRows.length === 0) return res.status(403).json({ Error: 'Card does not belong to user' });
+
+      const sql = `
+        INSERT INTO garden_settings
+          (user_id, card_id, min_temp, max_temp, min_humidity, max_humidity, min_moisture, max_moisture, ac_on, humidifier_on, watering_on, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          min_temp = VALUES(min_temp),
+          max_temp = VALUES(max_temp),
+          min_humidity = VALUES(min_humidity),
+          max_humidity = VALUES(max_humidity),
+          min_moisture = VALUES(min_moisture),
+          max_moisture = VALUES(max_moisture),
+          ac_on = VALUES(ac_on),
+          humidifier_on = VALUES(humidifier_on),
+          watering_on = VALUES(watering_on),
+          updated_at = NOW()
+      `;
+
+      const toNullOrNum = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+      const params = [
+        userId,
+        cardId,
+        toNullOrNum(minTemp),
+        toNullOrNum(maxTemp),
+        toNullOrNum(minHumidity),
+        toNullOrNum(maxHumidity),
+        toNullOrNum(minMoisture),
+        toNullOrNum(maxMoisture),
+        acOn ? 1 : 0,
+        humidifierOn ? 1 : 0,
+        wateringOn ? 1 : 0
+      ];
+
+      db.query(sql, params, (err4) => {
+        if (err4) {
+          console.error('Failed to save settings:', err4);
+          return res.status(500).json({ Error: 'Failed to save settings' });
+        }
+        return res.json({ Status: 'Success', Message: 'Settings saved' });
+      });
+    });
   });
 });
 
