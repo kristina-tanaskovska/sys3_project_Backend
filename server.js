@@ -55,6 +55,60 @@ const verifyUser = (req, res , next) => {
     });
 };
 
+
+//alert helper
+function getLatestStatsQuery(userId) {
+  /* returns one row for card with its most recent temperature/humidity/moisture */
+
+  return `
+    SELECT gs.card_id,
+           ci.title,
+           gs.min_temp, gs.max_temp,
+           gs.min_humidity, gs.max_humidity,
+           gs.min_moisture, gs.max_moisture,
+           cs.temperature, cs.humidity, cs.moisture
+    FROM garden_settings gs
+    JOIN card_info ci      ON ci.id  = gs.card_id
+    JOIN (
+        SELECT x.card_id, x.temperature, x.humidity, x.moisture
+        FROM card_stats x
+        JOIN (
+            SELECT card_id, MAX(recorded_at) AS latest
+            FROM card_stats
+            GROUP BY card_id
+        ) y ON y.card_id = x.card_id AND y.latest = x.recorded_at
+    ) cs ON cs.card_id = gs.card_id
+    WHERE gs.user_id = ${db.escape(userId)}
+  `;
+}
+
+/*check if parameters were exceeded */
+function buildAlerts(rows) {
+  const alerts = [];
+  rows.forEach(r => {
+    const push = (metric, value, limit, dir) =>
+      alerts.push({
+        cardId: r.card_id,
+        cardTitle: r.title,
+        metric,
+        value,
+        limit,
+        dir            
+      });
+
+    if (r.max_temp      != null && r.temperature >  r.max_temp)      push('temperature', r.temperature, r.max_temp, 'above');
+    if (r.min_temp      != null && r.temperature <  r.min_temp)      push('temperature', r.temperature, r.min_temp, 'below');
+    if (r.max_humidity  != null && r.humidity    >  r.max_humidity)  push('humidity',    r.humidity,    r.max_humidity, 'above');
+    if (r.min_humidity  != null && r.humidity    <  r.min_humidity)  push('humidity',    r.humidity,    r.min_humidity, 'below');
+    if (r.max_moisture  != null && r.moisture    >  r.max_moisture)  push('moisture',    r.moisture,    r.max_moisture, 'above');
+    if (r.min_moisture  != null && r.moisture    <  r.min_moisture)  push('moisture',    r.moisture,    r.min_moisture, 'below');
+  });
+  return alerts;
+}
+
+
+
+
 app.get('/', verifyUser, (req,res)=> {
     return res.json({Status: "Success", name: req.name});
 })
@@ -440,17 +494,39 @@ app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
   });
 });
 
+//getting live alerts
+app.get('/alerts', verifyUser, (req, res) => {
+  const name = req.name;
+  db.query('SELECT id FROM login WHERE name = ?', [name], (errU, uRows) => {
+    if (errU || uRows.length === 0) return res.status(401).json({ Error: 'User not found' });
+    const userId = uRows[0].id;
+
+    db.query(getLatestStatsQuery(userId), (errS, rows) => {
+      if (errS) return res.status(500).json({ Error: 'Failed to compute alerts' });
+      return res.json(buildAlerts(rows));
+    });
+  });
+});
 
 
-app.get('/logout', (req, res) => {
+/*app.get('/logout', (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
     secure: false,
     sameSite: 'None'    
   });
   return res.json({ Status: "Success", Message: "Logged out" });
-});
+});*/
 
+
+app.get('/logout', (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax'    
+  });
+  return res.json({ Status: "Success", Message: "Logged out" });
+});
 
 
 app.listen(6868, '0.0.0.0', () => {
