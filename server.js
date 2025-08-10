@@ -509,21 +509,12 @@ app.get('/alerts', verifyUser, (req, res) => {
 });
 
 
-/*app.get('/logout', (req, res) => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: false,
-    sameSite: 'None'    
-  });
-  return res.json({ Status: "Success", Message: "Logged out" });
-});*/
-
-
 app.get('/logout', (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
     secure: false,
-    sameSite: 'lax'    
+    sameSite: 'lax',
+    path: '/'  
   });
   return res.json({ Status: "Success", Message: "Logged out" });
 });
