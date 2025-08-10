@@ -7,6 +7,17 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 
+dotenv.config();
+//pool
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10,
+});
+
+
 const salt = 10;
 
 const app = express();
@@ -19,22 +30,15 @@ app.use(cors({
 }));
 app.use(cookieParser())
 
-dotenv.config();
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME
-});
 
-db.connect((err) => {
+pool.getConnection((err, connection) => {
   if (err) {
     console.error('DB connection failed:', err);
   } else {
     console.log('Connected to MySQL database');
+    connection.release(); 
   }
 });
-
 
 const verifyUser = (req, res , next) => {
     const token = req.cookies.token;
@@ -78,7 +82,7 @@ function getLatestStatsQuery(userId) {
             GROUP BY card_id
         ) y ON y.card_id = x.card_id AND y.latest = x.recorded_at
     ) cs ON cs.card_id = gs.card_id
-    WHERE gs.user_id = ${db.escape(userId)}
+    WHERE gs.user_id = ${pool.escape(userId)}
   `;
 }
 
@@ -124,7 +128,7 @@ app.post('/register', (req, res)=> {
         //req.body.password
         hash
     ]
-    db.query(sql, [values], (err, result) => {
+    pool.query(sql, [values], (err, result) => {
     if (err) {
         console.error("MySQL Insert Error:", err);  
         return res.json({ Error: "Inserting data error in server" });
@@ -139,7 +143,7 @@ app.post('/register', (req, res)=> {
 //login page
 app.post('/login', (req, res) => {
     const sql = 'SELECT * from login WHERE email= ?';
-    db.query(sql, [req.body.email], (err, data)=> {
+    pool.query(sql, [req.body.email], (err, data)=> {
         if (err) {
             console.error("Login DB query error:", err);
             return res.json({Error: "Error for finding login in server"});
@@ -172,7 +176,7 @@ app.post('/add-card', verifyUser, (req, res) => {
   console.log("cardId being added:", cardId); 
 
   const getUserSql = 'SELECT id FROM login WHERE name = ?';
-  db.query(getUserSql, [userName], (err, userResult) => {
+  pool.query(getUserSql, [userName], (err, userResult) => {
     if (err || userResult.length === 0) {
       return res.json({ Error: 'User not found' });
     }
@@ -181,12 +185,12 @@ app.post('/add-card', verifyUser, (req, res) => {
 
     // get existing cards 
     const getCardsSql = 'SELECT * FROM cards WHERE user_id = ?';
-    db.query(getCardsSql, [userId], (err, cardRows) => {
+    pool.query(getCardsSql, [userId], (err, cardRows) => {
       if (err) return res.json({ Error: 'Failed to retrieve cards' });
 
       if (cardRows.length === 0) {
         const insertSql = 'INSERT INTO cards (user_id, card1_id) VALUES (?, ?)';
-        db.query(insertSql, [userId, cardId], (err, result) => {
+        pool.query(insertSql, [userId, cardId], (err, result) => {
           if (err) return res.json({ Error: 'Failed to insert new cards row' });
           return res.json({ Status: 'Success', Message: 'Card added' });
         });
@@ -200,7 +204,7 @@ app.post('/add-card', verifyUser, (req, res) => {
         }
 
         const updateSql = `UPDATE cards SET ${nextSlot} = ? WHERE user_id = ?`;
-        db.query(updateSql, [cardId, userId], (err, result) => {
+        pool.query(updateSql, [cardId, userId], (err, result) => {
           if (err) return res.json({ Error: 'Failed to update cards' });
           return res.json({ Status: 'Success', Message: 'Card added' });
         });
@@ -216,7 +220,7 @@ app.get('/get-cards', verifyUser, (req, res) => {
   const userName = req.name;
 
   const getUserSql = 'SELECT id FROM login WHERE name = ?';
-  db.query(getUserSql, [userName], (err, userResult) => {
+  pool.query(getUserSql, [userName], (err, userResult) => {
     if (err || userResult.length === 0) {
       return res.json({ Error: 'User not found' });
     }
@@ -224,7 +228,7 @@ app.get('/get-cards', verifyUser, (req, res) => {
     const userId = userResult[0].id;
 
     const getCardsSql = 'SELECT * FROM cards WHERE user_id = ?';
-    db.query(getCardsSql, [userId], (err, cardRowResults) => {
+    pool.query(getCardsSql, [userId], (err, cardRowResults) => {
       if (err) return res.json({ Error: 'Failed to retrieve cards' });
 
       if (cardRowResults.length === 0) {
@@ -248,7 +252,7 @@ app.get('/get-cards', verifyUser, (req, res) => {
       const placeholders = cardIds.map(() => '?').join(', ');
       const getCardInfoSql = `SELECT * FROM card_info WHERE id IN (${placeholders})`;
 
-      db.query(getCardInfoSql, cardIds, (err, cardInfoResults) => {
+      pool.query(getCardInfoSql, cardIds, (err, cardInfoResults) => {
         if (err) return res.json({ Error: 'Failed to fetch card info' });
         return res.json({ cards: cardInfoResults });
       });
@@ -260,7 +264,7 @@ app.post('/create-card-info', verifyUser, (req, res) => {
   const { title, description, image_url } = req.body;
   const sql = 'INSERT INTO card_info (title, description, image_url) VALUES (?, ?, ?)';
    // console.log('Inserted card info ID:', result.insertId);
-  db.query(sql, [title, description, image_url], (err, result) => {
+  pool.query(sql, [title, description, image_url], (err, result) => {
     if (err) {
       console.error('Failed to insert into card_info:', err);
       return res.json({ Error: 'Database insert failed' });
@@ -277,7 +281,7 @@ app.post('/delete-card', verifyUser, (req, res) => {
   const userName = req.name;
 
   const getUserSql = 'SELECT id FROM login WHERE name = ?';
-  db.query(getUserSql, [userName], (err, result) => {
+  pool.query(getUserSql, [userName], (err, result) => {
     if (err || result.length === 0) {
       return res.json({ Error: 'User not found' });
     }
@@ -295,14 +299,14 @@ app.post('/delete-card', verifyUser, (req, res) => {
       WHERE user_id = ?
     `;
 
-    db.query(updateSql, [cardId, cardId, cardId, cardId, cardId, userId], (err, result) => {
+    pool.query(updateSql, [cardId, cardId, cardId, cardId, cardId, userId], (err, result) => {
       if (err) {
         return res.json({ Error: 'Failed to update card slots' });
       }
 
       //delete from card_info 
       const deleteInfoSql = 'DELETE FROM card_info WHERE id = ?';
-      db.query(deleteInfoSql, [cardId], (err2, result2) => {
+      pool.query(deleteInfoSql, [cardId], (err2, result2) => {
         if (err2) {
           return res.json({ Error: 'Failed to delete from card_info' });
         }
@@ -324,7 +328,7 @@ app.get('/get-card-stats/:cardId', verifyUser, (req, res) => {
     ORDER BY recorded_at DESC 
     LIMIT 1
   `;
-  db.query(sql, [cardId], (err, results) => {
+  pool.query(sql, [cardId], (err, results) => {
     if (err) return res.json({ Error: 'Failed to fetch stats' });
 
     if (results.length === 0) {
@@ -356,7 +360,7 @@ app.get('/history/:cardId', async (req, res) => {
     ORDER BY recorded_at ASC
   `;
 
-  db.query(sql, [cardId], (err, result) => {
+  pool.query(sql, [cardId], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(result);
   });
@@ -370,7 +374,7 @@ app.get('/garden-settings/:cardId', verifyUser, (req, res) => {
   const userName = req.name;
 
 
-  db.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
+  pool.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
     if (err || userRows.length === 0) return res.status(401).json({ Error: 'User not found' });
     const userId = userRows[0].id;
 
@@ -381,13 +385,13 @@ app.get('/garden-settings/:cardId', verifyUser, (req, res) => {
         AND (card1_id = ? OR card2_id = ? OR card3_id = ? OR card4_id = ? OR card5_id = ?)
       LIMIT 1
     `;
-    db.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
+    pool.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
       if (err2) return res.status(500).json({ Error: 'Failed to check card ownership' });
       if (ownRows.length === 0) return res.status(403).json({ Error: 'Card does not belong to user' });
 
       // fetch parms
       const sel = 'SELECT * FROM garden_settings WHERE user_id = ? AND card_id = ? LIMIT 1';
-      db.query(sel, [userId, cardId], (err3, rows) => {
+      pool.query(sel, [userId, cardId], (err3, rows) => {
         if (err3) return res.status(500).json({ Error: 'Failed to fetch settings' });
 
         if (!rows || rows.length === 0) {
@@ -436,7 +440,7 @@ app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
   } = req.body;
   const userName = req.name;
 
-  db.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
+  pool.query('SELECT id FROM login WHERE name = ?', [userName], (err, userRows) => {
     if (err || userRows.length === 0) return res.status(401).json({ Error: 'User not found' });
     const userId = userRows[0].id;
 
@@ -447,7 +451,7 @@ app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
         AND (card1_id = ? OR card2_id = ? OR card3_id = ? OR card4_id = ? OR card5_id = ?)
       LIMIT 1
     `;
-    db.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
+    pool.query(ownsCardSql, [userId, cardId, cardId, cardId, cardId, cardId], (err2, ownRows) => {
       if (err2) return res.status(500).json({ Error: 'Failed to check card ownership' });
       if (ownRows.length === 0) return res.status(403).json({ Error: 'Card does not belong to user' });
 
@@ -483,7 +487,7 @@ app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
         wateringOn ? 1 : 0
       ];
 
-      db.query(sql, params, (err4) => {
+      pool.query(sql, params, (err4) => {
         if (err4) {
           console.error('Failed to save settings:', err4);
           return res.status(500).json({ Error: 'Failed to save settings' });
@@ -497,11 +501,11 @@ app.post('/garden-settings/:cardId', verifyUser, (req, res) => {
 //getting live alerts
 app.get('/alerts', verifyUser, (req, res) => {
   const name = req.name;
-  db.query('SELECT id FROM login WHERE name = ?', [name], (errU, uRows) => {
+  pool.query('SELECT id FROM login WHERE name = ?', [name], (errU, uRows) => {
     if (errU || uRows.length === 0) return res.status(401).json({ Error: 'User not found' });
     const userId = uRows[0].id;
 
-    db.query(getLatestStatsQuery(userId), (errS, rows) => {
+    pool.query(getLatestStatsQuery(userId), (errS, rows) => {
       if (errS) return res.status(500).json({ Error: 'Failed to compute alerts' });
       return res.json(buildAlerts(rows));
     });
@@ -519,6 +523,89 @@ app.get('/logout', (req, res) => {
   return res.json({ Status: "Success", Message: "Logged out" });
 });
 
+
+
+
+//_____________________SENSOR SCRIPT_________________
+let intervalId = null;
+let currentCardId = null;
+
+function getRandomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+
+function insertSensorData({ card_id, temp, humidity, moisture }) {
+  return new Promise((resolve, reject) => {
+    const recorded_at = new Date();
+    const sql = `INSERT INTO card_stats (card_id, temperature, humidity, moisture, recorded_at)
+                 VALUES (?, ?, ?, ?, ?)`;
+
+    pool.query(sql, [card_id, temp, humidity, moisture, recorded_at], (error, results) => {
+      if (error) {
+        console.error('DB insert error:', error);
+        return reject(error);
+      }
+      console.log('Inserted:', { card_id, temp, humidity, moisture, recorded_at });
+      resolve(results);
+    });
+  });
+}
+
+
+async function generateAndInsertData() {
+  try {
+    if (!currentCardId) {
+      console.error('No card ID specified for data insertion');
+      return;
+    }
+    await insertSensorData({
+      card_id: currentCardId,
+      temp: Math.random() * 45,
+      humidity: Math.random() * 100,
+      moisture: Math.random() * 100,
+    });
+  } catch (error) {
+    console.error('Failed to insert data:', error);
+  }
+}
+
+
+// Start/Stop/status 
+app.post('/start-insertion', async (req, res) => {
+ if (intervalId) {
+    return res.json({ status: 'already running' });
+  }
+  
+  let { card_id } = req.body;
+  if (!card_id) {
+    return res.status(400).json({ error: 'card_id is required' });
+  }
+  card_id = parseInt(card_id, 10);
+  if (isNaN(card_id)) {
+    return res.status(400).json({ error: 'card_id must be a number' });
+  }
+  currentCardId = card_id;
+  
+  await generateAndInsertData(); // insert immediately
+  intervalId = setInterval(generateAndInsertData, 30 * 1000);
+  res.json({ status: 'started' });
+});
+
+app.post('/stop-insertion', (req, res) => {
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+    currentCardId = null;
+    res.json({ status: 'stopped' });
+  } else {
+    res.json({ status: 'not running' });
+  }
+});
+
+app.get('/insertion-status', (req, res) => {
+  res.json({ running: intervalId !== null });
+});
 
 app.listen(6868, '0.0.0.0', () => {
     console.log("Backend running on port 6868");
